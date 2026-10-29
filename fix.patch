@@ -1,0 +1,483 @@
+diff --git a/src/libs/actions/IOU/Hold.ts b/src/libs/actions/IOU/Hold.ts
+index 910be961..06f36492 100644
+--- a/src/libs/actions/IOU/Hold.ts
++++ b/src/libs/actions/IOU/Hold.ts
+@@ -751,6 +751,7 @@ function getDuplicateActionsForPartialReport(
+ 
+ function getReportFromHoldRequestsOnyxData({
+     chatReport,
++    shouldUpdateChatReport = true,
+     iouReport,
+     recipient,
+     policy,
+@@ -764,6 +765,7 @@ function getReportFromHoldRequestsOnyxData({
+     rules,
+ }: {
+     chatReport: OnyxTypes.Report;
++    shouldUpdateChatReport?: boolean;
+     iouReport: OnyxEntry<OnyxTypes.Report>;
+     recipient: Participant;
+     policy: OnyxEntry<OnyxTypes.Policy>;
+@@ -915,14 +917,6 @@ function getReportFromHoldRequestsOnyxData({
+     const shouldUpdateOriginalReportTotals = !shouldMoveScanFailedTransactions && holdTransactions.length > 0 && iouReport?.unheldTotal !== undefined;
+ 
+     const optimisticData: Array<OnyxUpdate<typeof ONYXKEYS.COLLECTION.REPORT | typeof ONYXKEYS.COLLECTION.REPORT_ACTIONS | typeof ONYXKEYS.COLLECTION.TRANSACTION>> = [
+-        {
+-            onyxMethod: Onyx.METHOD.MERGE,
+-            key: `${ONYXKEYS.COLLECTION.REPORT}${chatReport.reportID}`,
+-            value: {
+-                iouReportID: optimisticExpenseReport.reportID,
+-                lastVisibleActionCreated: optimisticExpenseReportPreview.created,
+-            },
+-        },
+         {
+             onyxMethod: Onyx.METHOD.MERGE,
+             key: `${ONYXKEYS.COLLECTION.REPORT}${optimisticExpenseReport.reportID}`,
+@@ -939,13 +933,6 @@ function getReportFromHoldRequestsOnyxData({
+                     : {}),
+             },
+         },
+-        {
+-            onyxMethod: Onyx.METHOD.MERGE,
+-            key: `${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${chatReport.reportID}`,
+-            value: {
+-                [optimisticExpenseReportPreview.reportActionID]: optimisticExpenseReportPreview,
+-            },
+-        },
+         {
+             onyxMethod: Onyx.METHOD.MERGE,
+             key: `${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${iouReport?.reportID}`,
+@@ -991,15 +978,6 @@ function getReportFromHoldRequestsOnyxData({
+     }
+ 
+     const successData: Array<OnyxUpdate<typeof ONYXKEYS.COLLECTION.REPORT_ACTIONS>> = [
+-        {
+-            onyxMethod: Onyx.METHOD.MERGE,
+-            key: `${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${chatReport.reportID}`,
+-            value: {
+-                [optimisticExpenseReportPreview.reportActionID]: {
+-                    pendingAction: null,
+-                },
+-            },
+-        },
+         {
+             onyxMethod: Onyx.METHOD.MERGE,
+             key: `${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${optimisticExpenseReport.reportID}`,
+@@ -1008,26 +986,11 @@ function getReportFromHoldRequestsOnyxData({
+     ];
+ 
+     const failureData: Array<OnyxUpdate<typeof ONYXKEYS.COLLECTION.REPORT | typeof ONYXKEYS.COLLECTION.REPORT_ACTIONS | typeof ONYXKEYS.COLLECTION.TRANSACTION>> = [
+-        {
+-            onyxMethod: Onyx.METHOD.MERGE,
+-            key: `${ONYXKEYS.COLLECTION.REPORT}${chatReport.reportID}`,
+-            value: {
+-                iouReportID: chatReport.iouReportID,
+-                lastVisibleActionCreated: chatReport.lastVisibleActionCreated,
+-            },
+-        },
+         {
+             onyxMethod: Onyx.METHOD.MERGE,
+             key: `${ONYXKEYS.COLLECTION.REPORT}${optimisticExpenseReport.reportID}`,
+             value: null,
+         },
+-        {
+-            onyxMethod: Onyx.METHOD.MERGE,
+-            key: `${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${chatReport.reportID}`,
+-            value: {
+-                [optimisticExpenseReportPreview.reportActionID]: null,
+-            },
+-        },
+         {
+             onyxMethod: Onyx.METHOD.MERGE,
+             key: `${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${iouReport?.reportID}`,
+@@ -1050,6 +1013,53 @@ function getReportFromHoldRequestsOnyxData({
+         },
+     ];
+ 
++    // Fallback chat metadata is enough to move expenses, but must not create a chat the delegate cannot access.
++    if (shouldUpdateChatReport) {
++        optimisticData.push(
++            {
++                onyxMethod: Onyx.METHOD.MERGE,
++                key: `${ONYXKEYS.COLLECTION.REPORT}${chatReport.reportID}`,
++                value: {
++                    iouReportID: optimisticExpenseReport.reportID,
++                    lastVisibleActionCreated: optimisticExpenseReportPreview.created,
++                },
++            },
++            {
++                onyxMethod: Onyx.METHOD.MERGE,
++                key: `${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${chatReport.reportID}`,
++                value: {
++                    [optimisticExpenseReportPreview.reportActionID]: optimisticExpenseReportPreview,
++                },
++            },
++        );
++        successData.push({
++            onyxMethod: Onyx.METHOD.MERGE,
++            key: `${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${chatReport.reportID}`,
++            value: {
++                [optimisticExpenseReportPreview.reportActionID]: {
++                    pendingAction: null,
++                },
++            },
++        });
++        failureData.push(
++            {
++                onyxMethod: Onyx.METHOD.MERGE,
++                key: `${ONYXKEYS.COLLECTION.REPORT}${chatReport.reportID}`,
++                value: {
++                    iouReportID: chatReport.iouReportID,
++                    lastVisibleActionCreated: chatReport.lastVisibleActionCreated,
++                },
++            },
++            {
++                onyxMethod: Onyx.METHOD.MERGE,
++                key: `${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${chatReport.reportID}`,
++                value: {
++                    [optimisticExpenseReportPreview.reportActionID]: null,
++                },
++            },
++        );
++    }
++
+     if (shouldUpdateOriginalReportTotals) {
+         failureData.push({
+             onyxMethod: Onyx.METHOD.MERGE,
+diff --git a/src/libs/actions/IOU/ReportWorkflow.ts b/src/libs/actions/IOU/ReportWorkflow.ts
+index 02c0cc8c..f2c68d1a 100644
+--- a/src/libs/actions/IOU/ReportWorkflow.ts
++++ b/src/libs/actions/IOU/ReportWorkflow.ts
+@@ -42,6 +42,7 @@ import {
+     getUnheldReimbursableTotal,
+     hasHeldExpenses as hasHeldExpensesReportUtils,
+     hasOutstandingChildRequest,
++    isExpenseReport,
+ } from '@libs/ReportUtils';
+ import playSound, {SOUNDS} from '@libs/Sound';
+ import {shouldRestrictUserBillableActions} from '@libs/SubscriptionUtils';
+@@ -344,15 +345,17 @@ function approveMoneyRequest(params: ApproveMoneyRequestFunctionParams) {
+             | typeof ONYXKEYS.COLLECTION.TRANSACTION
+             | typeof ONYXKEYS.COLLECTION.TRANSACTION_VIOLATIONS
+         >
+-    > = [
+-        {
++    > = [];
++
++    if (chatReport) {
++        failureData.push({
+             onyxMethod: Onyx.METHOD.MERGE,
+             key: `${ONYXKEYS.COLLECTION.REPORT}${expenseReport.chatReportID}`,
+             value: {
+-                hasOutstandingChildRequest: chatReport?.hasOutstandingChildRequest,
++                hasOutstandingChildRequest: chatReport.hasOutstandingChildRequest,
+             },
+-        },
+-    ];
++        });
++    }
+ 
+     if (!isDEWPolicy) {
+         failureData.push({
+@@ -433,10 +436,23 @@ function approveMoneyRequest(params: ApproveMoneyRequestFunctionParams) {
+     let optimisticHoldReportExpenseActionIDs;
+     let optimisticReportActionCopyIDs;
+     let optimisticCreatedReportForUnapprovedTransactionsActionID;
+-    if (!full && !!chatReport && !!expenseReport) {
++    // A delegate can approve the expense report without having its workspace chat cached.
++    const holdChatReport: OnyxEntry<OnyxTypes.Report> =
++        chatReport ??
++        (!full && isExpenseReport(expenseReport) && expenseReport.chatReportID && expenseReport.policyID
++            ? {
++                  reportID: expenseReport.chatReportID,
++                  type: CONST.REPORT.TYPE.CHAT,
++                  chatType: CONST.REPORT.CHAT_TYPE.POLICY_EXPENSE_CHAT,
++                  policyID: expenseReport.policyID,
++                  ownerAccountID: expenseReport.ownerAccountID,
++              }
++            : undefined);
++    if (!full && holdChatReport) {
+         const originalCreated = getReportOriginalCreationTimestamp(expenseReport);
+         const holdReportOnyxData = getReportFromHoldRequestsOnyxData({
+-            chatReport,
++            chatReport: holdChatReport,
++            shouldUpdateChatReport: !!chatReport,
+             iouReport: expenseReport,
+             recipient: {accountID: expenseReport.ownerAccountID},
+             policy: expenseReportPolicy,
+diff --git a/tests/actions/IOUTest/ReportWorkflowTest.ts b/tests/actions/IOUTest/ReportWorkflowTest.ts
+index a35097e0..4fa3e85e 100644
+--- a/tests/actions/IOUTest/ReportWorkflowTest.ts
++++ b/tests/actions/IOUTest/ReportWorkflowTest.ts
+@@ -12,6 +12,7 @@ import {requestMoney} from '@libs/actions/IOU/TrackExpense';
+ import initOnyxDerivedValues from '@libs/actions/OnyxDerived';
+ import {createWorkspace, deleteWorkspace, generatePolicyID, setWorkspaceApprovalMode} from '@libs/actions/Policy/Policy';
+ import {submitMoneyRequestOnSearch} from '@libs/actions/Search';
++import {WRITE_COMMANDS} from '@libs/API/types';
+ import Navigation from '@libs/Navigation/Navigation';
+ import {getOriginalMessage, isSubmittedAction} from '@libs/ReportActionsUtils';
+ import getReportPreviewAction from '@libs/ReportPreviewActionUtils';
+@@ -39,7 +40,7 @@ import ONYXKEYS from '@src/ONYXKEYS';
+ import ROUTES from '@src/ROUTES';
+ import type {Policy, Report, ReportNameValuePairs} from '@src/types/onyx';
+ import type {ReportCollectionDataSet} from '@src/types/onyx/Report';
+-import type {ReportActions, ReportActionsCollectionDataSet} from '@src/types/onyx/ReportAction';
++import type {ReportAction, ReportActions, ReportActionsCollectionDataSet} from '@src/types/onyx/ReportAction';
+ import type {AnyOnyxData} from '@src/types/onyx/Request';
+ import type Transaction from '@src/types/onyx/Transaction';
+ import type {TransactionCollectionDataSet} from '@src/types/onyx/Transaction';
+@@ -156,7 +157,8 @@ describe('actions/IOU/ReportWorkflow', () => {
+         return Onyx.clear().then(waitForBatchedUpdates);
+     });
+ 
+-    afterEach(() => {
++    afterEach(async () => {
++        await mockFetch?.resume();
+         mockFetch?.mockClear();
+         jest.restoreAllMocks();
+     });
+@@ -5438,6 +5440,244 @@ describe('actions/IOU/ReportWorkflow', () => {
+             await Onyx.clear();
+         });
+ 
++        describe('approving a held split', () => {
++            const approvedAmount = 15000;
++            const heldAmount = 5000;
++            let heldTransaction: Transaction;
++            let heldAction: ReportAction;
++            let heldThread: Report;
++
++            beforeEach(async () => {
++                const currency = 'INR';
++                chatReport = {...chatReport, lastVisibleActionCreated: '2026-01-01 00:00:00.000', hasOutstandingChildRequest: true};
++                expenseReport = {
++                    ...expenseReport,
++                    currency,
++                    total: -(approvedAmount + heldAmount),
++                    reimbursableTotal: -(approvedAmount + heldAmount),
++                    nonReimbursableTotal: 0,
++                    unheldTotal: -approvedAmount,
++                    unheldReimbursableTotal: -approvedAmount,
++                    unheldNonReimbursableTotal: 0,
++                };
++                policy = {...policy, outputCurrency: currency};
++                heldTransaction = {
++                    ...buildOptimisticTransaction({transactionParams: {amount: heldAmount, currency, reportID: expenseReport.reportID}}),
++                    reimbursable: true,
++                    comment: {source: 'split', originalTransactionID: 'split-parent', hold: 'hold-reason'},
++                };
++                const transactions = [10000, 5000].map((amount) => ({
++                    ...buildOptimisticTransaction({transactionParams: {amount, currency, reportID: expenseReport.reportID}}),
++                    reimbursable: true,
++                }));
++                const reportActions: ReportActions = {};
++                for (const transaction of [...transactions, heldTransaction]) {
++                    const action = buildOptimisticIOUReportAction({
++                        type: CONST.IOU.REPORT_ACTION_TYPE.CREATE,
++                        amount: transaction.amount,
++                        currency,
++                        comment: '',
++                        participants: [],
++                        transactionID: transaction.transactionID,
++                        getCurrencyDecimals: getCurrencyDecimalsLocal,
++                    });
++                    if (transaction.transactionID === heldTransaction.transactionID) {
++                        action.childReportID = '789';
++                        heldAction = action;
++                        heldThread = {
++                            reportID: action.childReportID,
++                            type: CONST.REPORT.TYPE.CHAT,
++                            parentReportID: expenseReport.reportID,
++                            chatReportID: expenseReport.reportID,
++                            parentReportActionID: action.reportActionID,
++                        };
++                        await Onyx.set(`${ONYXKEYS.COLLECTION.REPORT}${heldThread.reportID}`, heldThread);
++                    }
++                    reportActions[action.reportActionID] = action;
++                    await Onyx.set(`${ONYXKEYS.COLLECTION.TRANSACTION}${transaction.transactionID}`, transaction);
++                }
++                await Onyx.multiSet({
++                    [ONYXKEYS.SESSION]: {email: adminEmail, accountID: adminAccountID},
++                    [`${ONYXKEYS.COLLECTION.POLICY}${policy.id}`]: policy,
++                    [`${ONYXKEYS.COLLECTION.REPORT}${expenseReport.reportID}`]: expenseReport,
++                    [`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${expenseReport.reportID}`]: reportActions,
++                });
++                await waitForBatchedUpdates();
++            });
++
++            function approveHeldSplit(full = false) {
++                return approveMoneyRequest({
++                    rules: undefined,
++                    getCurrencyDecimals: getCurrencyDecimalsLocal,
++                    expenseReport,
++                    expenseReportPolicy: policy,
++                    currentUserAccountIDParam: adminAccountID,
++                    currentUserEmailParam: adminEmail,
++                    hasViolations: false,
++                    isASAPSubmitBetaEnabled: false,
++                    userBillingGracePeriodEnds: undefined,
++                    amountOwed: 0,
++                    full,
++                    ownerBillingGracePeriodEnd: undefined,
++                    delegateEmail: undefined,
++                    delegateAccountID: undefined,
++                    isTrackIntentUser: false,
++                    ownerLogin: undefined,
++                });
++            }
++
++            it.each(['report', 'draft', 'missing'] as const)('moves the held split before and after the response with chat in %s', async (chatLocation) => {
++                // Given INR 200 with INR 50 held, approval must not depend on the delegate caching the workspace chat.
++                await Onyx.multiSet({
++                    [`${ONYXKEYS.COLLECTION.REPORT}${chatReport.reportID}`]: chatLocation === 'report' ? chatReport : null,
++                    [`${ONYXKEYS.COLLECTION.REPORT_DRAFT}${chatReport.reportID}`]: chatLocation === 'draft' ? chatReport : null,
++                });
++                await waitForBatchedUpdates();
++                const writeSpy = jest.spyOn(API, 'write');
++                mockFetch.pause();
++                try {
++                    // When approval is pending, the held transaction, its thread and all totals move together.
++                    const heldReportID = approveHeldSplit();
++                    await waitForBatchedUpdates();
++                    expect(heldReportID).toEqual(expect.any(String));
++                    expect(await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT}${expenseReport.reportID}`)).toMatchObject({
++                        total: -approvedAmount,
++                        reimbursableTotal: -approvedAmount,
++                        nonReimbursableTotal: 0,
++                    });
++                    expect(await getOnyxValue(`${ONYXKEYS.COLLECTION.TRANSACTION}${heldTransaction.transactionID}`)).toMatchObject({reportID: heldReportID});
++                    expect(await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT}${heldReportID}`)).toMatchObject({
++                        type: CONST.REPORT.TYPE.EXPENSE,
++                        total: -heldAmount,
++                        chatReportID: chatReport.reportID,
++                    });
++                    const movedThread = await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT}${heldThread.reportID}`);
++                    expect(movedThread).toMatchObject({parentReportID: heldReportID, chatReportID: heldReportID});
++                    // eslint-disable-next-line rulesdir/no-multiple-api-calls -- Verify that the real request uses the IDs already stored optimistically.
++                    const [command, parameters] = getRequiredWriteCall(writeSpy.mock.calls);
++                    expect(command).toBe(WRITE_COMMANDS.APPROVE_MONEY_REQUEST);
++                    expect(parameters).toMatchObject({
++                        optimisticHoldReportID: heldReportID,
++                        optimisticHoldActionID: expect.any(String),
++                        optimisticCreatedReportForUnapprovedTransactionsActionID: expect.any(String),
++                        optimisticHoldReportExpenseActionIDs: JSON.stringify([{optimisticReportActionID: movedThread?.parentReportActionID, oldReportActionID: heldAction.reportActionID}]),
++                    });
++                    const heldReport = await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT}${heldReportID}`);
++                    expect(heldReport?.parentReportActionID).toBe(parameters.optimisticHoldActionID);
++                    if (chatLocation === 'missing') {
++                        expect(await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT}${chatReport.reportID}`)).toBeFalsy();
++                        expect(await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${chatReport.reportID}`)).toBeFalsy();
++                    }
++
++                    // Then a response that updates total but omits reimbursableTotal must not restore the stale INR 200 footer.
++                    let didReceiveResponse = false;
++                    mockFetch.mockAPICommand(WRITE_COMMANDS.APPROVE_MONEY_REQUEST, () => {
++                        didReceiveResponse = true;
++                        return {
++                            jsonCode: 200,
++                            onyxData: [
++                                {onyxMethod: Onyx.METHOD.MERGE, key: `${ONYXKEYS.COLLECTION.REPORT}${expenseReport.reportID}`, value: {total: -approvedAmount}},
++                                {onyxMethod: Onyx.METHOD.MERGE, key: `${ONYXKEYS.COLLECTION.REPORT}${heldReportID}`, value: {total: -heldAmount}},
++                                {onyxMethod: Onyx.METHOD.MERGE, key: `${ONYXKEYS.COLLECTION.TRANSACTION}${heldTransaction.transactionID}`, value: {reportID: heldReportID}},
++                            ],
++                        };
++                    });
++                    await mockFetch.resume();
++                    await waitForBatchedUpdates();
++                    expect(didReceiveResponse).toBe(true);
++                    expect(await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT}${expenseReport.reportID}`)).toMatchObject({
++                        total: -approvedAmount,
++                        reimbursableTotal: -approvedAmount,
++                    });
++                    expect(await getOnyxValue(`${ONYXKEYS.COLLECTION.TRANSACTION}${heldTransaction.transactionID}`)).toMatchObject({reportID: heldReportID});
++                } finally {
++                    await mockFetch.resume();
++                }
++            });
++
++            it.each(['report', 'missing', 'returned'] as const)('restores the held split on failure with chat %s', async (chatLocation) => {
++                // Given a held split, a failed approval must restore its original report and thread without inventing or deleting a chat.
++                await Onyx.set(`${ONYXKEYS.COLLECTION.REPORT}${chatReport.reportID}`, chatLocation === 'report' ? chatReport : null);
++                await waitForBatchedUpdates();
++                mockFetch.mockAPICommand(WRITE_COMMANDS.APPROVE_MONEY_REQUEST, () => ({
++                    jsonCode: 400,
++                    onyxData: chatLocation === 'returned' ? [{onyxMethod: Onyx.METHOD.MERGE, key: `${ONYXKEYS.COLLECTION.REPORT}${chatReport.reportID}`, value: chatReport}] : [],
++                }));
++                mockFetch.pause();
++                try {
++                    // When the server rejects the approval after optimistic movement, apply the normal failure updates.
++                    const heldReportID = approveHeldSplit();
++                    await waitForBatchedUpdates();
++                    expect(await getOnyxValue(`${ONYXKEYS.COLLECTION.TRANSACTION}${heldTransaction.transactionID}`)).toMatchObject({reportID: heldReportID});
++                    await mockFetch.resume();
++                    await waitForBatchedUpdates();
++
++                    // Then restore money, transaction membership, actions and thread parents; preserve any chat supplied by the server.
++                    expect(await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT}${expenseReport.reportID}`)).toMatchObject({
++                        total: expenseReport.total,
++                        reimbursableTotal: expenseReport.reimbursableTotal,
++                        nonReimbursableTotal: expenseReport.nonReimbursableTotal,
++                        stateNum: expenseReport.stateNum,
++                        statusNum: expenseReport.statusNum,
++                    });
++                    expect(await getOnyxValue(`${ONYXKEYS.COLLECTION.TRANSACTION}${heldTransaction.transactionID}`)).toEqual(heldTransaction);
++                    expect(await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT}${heldThread.reportID}`)).toMatchObject(heldThread);
++                    const actions = await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${expenseReport.reportID}`);
++                    expect(actions?.[heldAction.reportActionID]).toEqual(heldAction);
++                    expect(await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT}${heldReportID}`)).toBeFalsy();
++                    const restoredChat = await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT}${chatReport.reportID}`);
++                    if (chatLocation === 'missing') {
++                        expect(restoredChat).toBeFalsy();
++                    } else {
++                        expect(restoredChat).toMatchObject(chatReport);
++                    }
++                } finally {
++                    await mockFetch.resume();
++                }
++            });
++
++            it('excludes a non-reimbursable held split without a cached chat', async () => {
++                // Given INR 150 reimbursable and an INR 50 non-reimbursable held split, each total must keep its meaning.
++                expenseReport = {...expenseReport, reimbursableTotal: -approvedAmount, nonReimbursableTotal: -heldAmount};
++                await Onyx.multiSet({
++                    [`${ONYXKEYS.COLLECTION.REPORT}${expenseReport.reportID}`]: expenseReport,
++                    [`${ONYXKEYS.COLLECTION.REPORT}${chatReport.reportID}`]: null,
++                    [`${ONYXKEYS.COLLECTION.TRANSACTION}${heldTransaction.transactionID}`]: {...heldTransaction, reimbursable: false},
++                });
++                await waitForBatchedUpdates();
++
++                // When only the unheld expenses are approved, the non-reimbursable amount moves to the held report.
++                const heldReportID = approveHeldSplit();
++                await waitForBatchedUpdates();
++
++                // Then the original report contains only INR 150 reimbursable, while the held report contains INR 50 non-reimbursable.
++                expect(await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT}${expenseReport.reportID}`)).toMatchObject({
++                    total: -approvedAmount,
++                    reimbursableTotal: -approvedAmount,
++                    nonReimbursableTotal: 0,
++                });
++                expect(await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT}${heldReportID}`)).toMatchObject({total: -heldAmount, nonReimbursableTotal: -heldAmount});
++            });
++
++            it('keeps all expenses on the original report for full approval without a cached chat', async () => {
++                // Given a held split and no cached chat, approving everything must retain the full report amount.
++                await Onyx.set(`${ONYXKEYS.COLLECTION.REPORT}${chatReport.reportID}`, null);
++                await waitForBatchedUpdates();
++
++                // When all expenses are approved, the fallback must not separate the held transaction.
++                const heldReportID = approveHeldSplit(true);
++                await waitForBatchedUpdates();
++
++                // Then the original report still contains INR 200 and its formerly held transaction.
++                expect(heldReportID).toBeUndefined();
++                expect(await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT}${expenseReport.reportID}`)).toMatchObject({
++                    total: -(approvedAmount + heldAmount),
++                    reimbursableTotal: -(approvedAmount + heldAmount),
++                });
++                expect(await getOnyxValue(`${ONYXKEYS.COLLECTION.TRANSACTION}${heldTransaction.transactionID}`)).toMatchObject({reportID: expenseReport.reportID});
++            });
++        });
++
+         it('the new expense report should be an outstanding report when approving partially', async () => {
+             await Onyx.set(ONYXKEYS.SESSION, {
+                 email: adminEmail,

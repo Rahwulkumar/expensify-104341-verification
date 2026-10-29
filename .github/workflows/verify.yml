@@ -1,0 +1,125 @@
+name: Verify Expensify 104341
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: app
+        shell: bash
+    env:
+      CI: 'true'
+      STANDALONE_NEW_DOT: 'true'
+      TZ: utc
+    steps:
+      - name: Read verification package
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Read exact upstream baseline
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: Expensify/App
+          ref: f24918318d03b8f83ccb88ce41de278070e70775
+          path: app
+          persist-credentials: false
+      - name: Use repository Node version
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26.12.1
+      - name: Use repository Bun version
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
+      - name: Apply and verify reviewed patch
+        run: |
+          git apply --check ../fix.patch
+          git apply ../fix.patch
+          sha256sum --check ../source-hashes.sha256
+          git diff --check
+          git diff --stat
+          mkdir -p ../results
+          {
+            printf 'verificationCommit=%s\n' "$GITHUB_SHA"
+            printf 'upstreamCommit='
+            git rev-parse HEAD
+            sha256sum ../fix.patch
+            cat ../source-hashes.sha256
+            node --version
+            npm --version
+            bun --version
+          } | tee ../results/provenance.txt
+      - name: Install pinned dependencies and required patches
+        run: npm ci --include=dev --no-audit --no-fund
+      - name: Check all TypeScript projects
+        id: types
+        continue-on-error: true
+        run: npm run typecheck 2>&1 | tee ../results/typecheck.log
+      - name: Lint all three changed files through the repository pipeline
+        id: lint
+        continue-on-error: true
+        env:
+          ESLINT_CONCURRENCY: 'off'
+          NODE_OPTIONS: --max-old-space-size=14336
+          SEATBELT_READ_ONLY: '1'
+        run: npm run lint -- --no-cache --timings src/libs/actions/IOU/ReportWorkflow.ts src/libs/actions/IOU/Hold.ts tests/actions/IOUTest/ReportWorkflowTest.ts 2>&1 | tee ../results/lint.log
+      - name: Check formatting and spelling
+        id: style
+        continue-on-error: true
+        run: |
+          ./node_modules/.bin/oxfmt --check src/libs/actions/IOU/ReportWorkflow.ts src/libs/actions/IOU/Hold.ts tests/actions/IOUTest/ReportWorkflowTest.ts
+          npm run spell-changed -- src/libs/actions/IOU/ReportWorkflow.ts src/libs/actions/IOU/Hold.ts tests/actions/IOUTest/ReportWorkflowTest.ts
+      - name: Run approval, hold and payment regression suites
+        id: tests
+        continue-on-error: true
+        run: node --experimental-vm-modules --max-old-space-size=4096 node_modules/jest/bin/jest.js --runInBand tests/actions/IOUTest/ReportWorkflowTest.ts tests/actions/IOUTest/HoldTest.ts tests/actions/IOUTest/PayMoneyRequestTest.ts --json --outputFile=../results/tests.json 2>&1 | tee ../results/tests.log
+      - name: Build patched staging browser app
+        id: build
+        continue-on-error: true
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+          RAYON_NUM_THREADS: '2'
+        run: npm run build-staging 2>&1 | tee ../results/build.log
+      - name: Save check evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verification-results
+          path: results/
+          retention-days: 1
+          if-no-files-found: warn
+      - name: Attach browser build provenance
+        if: steps.build.outcome == 'success'
+        run: cp ../results/provenance.txt dist/verification-provenance.txt
+      - name: Save browser build for local manual verification
+        if: steps.build.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: patched-staging-web
+          path: |
+            app/dist/
+            !app/dist/**/*.map
+          retention-days: 1
+          if-no-files-found: error
+      - name: Require every check to pass
+        if: always()
+        env:
+          TYPES: ${{ steps.types.outcome }}
+          LINT: ${{ steps.lint.outcome }}
+          STYLE: ${{ steps.style.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+        run: |
+          printf 'types=%s lint=%s style=%s tests=%s build=%s\n' "$TYPES" "$LINT" "$STYLE" "$TESTS" "$BUILD"
+          test "$TYPES" = success
+          test "$LINT" = success
+          test "$STYLE" = success
+          test "$TESTS" = success
+          test "$BUILD" = success
