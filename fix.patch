@@ -206,7 +206,7 @@ index 02c0cc8c..f2c68d1a 100644
              recipient: {accountID: expenseReport.ownerAccountID},
              policy: expenseReportPolicy,
 diff --git a/tests/actions/IOUTest/ReportWorkflowTest.ts b/tests/actions/IOUTest/ReportWorkflowTest.ts
-index a35097e0..4fa3e85e 100644
+index a35097e0..5c630197 100644
 --- a/tests/actions/IOUTest/ReportWorkflowTest.ts
 +++ b/tests/actions/IOUTest/ReportWorkflowTest.ts
 @@ -12,6 +12,7 @@ import {requestMoney} from '@libs/actions/IOU/TrackExpense';
@@ -217,15 +217,15 @@ index a35097e0..4fa3e85e 100644
  import Navigation from '@libs/Navigation/Navigation';
  import {getOriginalMessage, isSubmittedAction} from '@libs/ReportActionsUtils';
  import getReportPreviewAction from '@libs/ReportPreviewActionUtils';
-@@ -39,7 +40,7 @@ import ONYXKEYS from '@src/ONYXKEYS';
+@@ -37,7 +38,7 @@ import DateUtils from '@src/libs/DateUtils';
+ import {generateAccountID} from '@src/libs/UserUtils';
+ import ONYXKEYS from '@src/ONYXKEYS';
  import ROUTES from '@src/ROUTES';
- import type {Policy, Report, ReportNameValuePairs} from '@src/types/onyx';
+-import type {Policy, Report, ReportNameValuePairs} from '@src/types/onyx';
++import type {Policy, Report, ReportAction, ReportNameValuePairs} from '@src/types/onyx';
  import type {ReportCollectionDataSet} from '@src/types/onyx/Report';
--import type {ReportActions, ReportActionsCollectionDataSet} from '@src/types/onyx/ReportAction';
-+import type {ReportAction, ReportActions, ReportActionsCollectionDataSet} from '@src/types/onyx/ReportAction';
+ import type {ReportActions, ReportActionsCollectionDataSet} from '@src/types/onyx/ReportAction';
  import type {AnyOnyxData} from '@src/types/onyx/Request';
- import type Transaction from '@src/types/onyx/Transaction';
- import type {TransactionCollectionDataSet} from '@src/types/onyx/Transaction';
 @@ -156,7 +157,8 @@ describe('actions/IOU/ReportWorkflow', () => {
          return Onyx.clear().then(waitForBatchedUpdates);
      });
@@ -236,7 +236,7 @@ index a35097e0..4fa3e85e 100644
          mockFetch?.mockClear();
          jest.restoreAllMocks();
      });
-@@ -5438,6 +5440,244 @@ describe('actions/IOU/ReportWorkflow', () => {
+@@ -5438,6 +5440,238 @@ describe('actions/IOU/ReportWorkflow', () => {
              await Onyx.clear();
          });
  
@@ -296,12 +296,10 @@ index a35097e0..4fa3e85e 100644
 +                    reportActions[action.reportActionID] = action;
 +                    await Onyx.set(`${ONYXKEYS.COLLECTION.TRANSACTION}${transaction.transactionID}`, transaction);
 +                }
-+                await Onyx.multiSet({
-+                    [ONYXKEYS.SESSION]: {email: adminEmail, accountID: adminAccountID},
-+                    [`${ONYXKEYS.COLLECTION.POLICY}${policy.id}`]: policy,
-+                    [`${ONYXKEYS.COLLECTION.REPORT}${expenseReport.reportID}`]: expenseReport,
-+                    [`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${expenseReport.reportID}`]: reportActions,
-+                });
++                await Onyx.set(ONYXKEYS.SESSION, {email: adminEmail, accountID: adminAccountID});
++                await Onyx.set(`${ONYXKEYS.COLLECTION.POLICY}${policy.id}`, policy);
++                await Onyx.set(`${ONYXKEYS.COLLECTION.REPORT}${expenseReport.reportID}`, expenseReport);
++                await Onyx.set(`${ONYXKEYS.COLLECTION.REPORT_ACTIONS}${expenseReport.reportID}`, reportActions);
 +                await waitForBatchedUpdates();
 +            });
 +
@@ -328,11 +326,10 @@ index a35097e0..4fa3e85e 100644
 +
 +            it.each(['report', 'draft', 'missing'] as const)('moves the held split before and after the response with chat in %s', async (chatLocation) => {
 +                // Given INR 200 with INR 50 held, approval must not depend on the delegate caching the workspace chat.
-+                await Onyx.multiSet({
-+                    [`${ONYXKEYS.COLLECTION.REPORT}${chatReport.reportID}`]: chatLocation === 'report' ? chatReport : null,
-+                    [`${ONYXKEYS.COLLECTION.REPORT_DRAFT}${chatReport.reportID}`]: chatLocation === 'draft' ? chatReport : null,
-+                });
++                await Onyx.set(`${ONYXKEYS.COLLECTION.REPORT}${chatReport.reportID}`, chatLocation === 'report' ? chatReport : null);
++                await Onyx.set(`${ONYXKEYS.COLLECTION.REPORT_DRAFT}${chatReport.reportID}`, chatLocation === 'draft' ? chatReport : null);
 +                await waitForBatchedUpdates();
++                // eslint-disable-next-line rulesdir/no-multiple-api-calls -- This spy observes the single approval request to verify its optimistic IDs.
 +                const writeSpy = jest.spyOn(API, 'write');
 +                mockFetch.pause();
 +                try {
@@ -353,7 +350,6 @@ index a35097e0..4fa3e85e 100644
 +                    });
 +                    const movedThread = await getOnyxValue(`${ONYXKEYS.COLLECTION.REPORT}${heldThread.reportID}`);
 +                    expect(movedThread).toMatchObject({parentReportID: heldReportID, chatReportID: heldReportID});
-+                    // eslint-disable-next-line rulesdir/no-multiple-api-calls -- Verify that the real request uses the IDs already stored optimistically.
 +                    const [command, parameters] = getRequiredWriteCall(writeSpy.mock.calls);
 +                    expect(command).toBe(WRITE_COMMANDS.APPROVE_MONEY_REQUEST);
 +                    expect(parameters).toMatchObject({
@@ -439,11 +435,9 @@ index a35097e0..4fa3e85e 100644
 +            it('excludes a non-reimbursable held split without a cached chat', async () => {
 +                // Given INR 150 reimbursable and an INR 50 non-reimbursable held split, each total must keep its meaning.
 +                expenseReport = {...expenseReport, reimbursableTotal: -approvedAmount, nonReimbursableTotal: -heldAmount};
-+                await Onyx.multiSet({
-+                    [`${ONYXKEYS.COLLECTION.REPORT}${expenseReport.reportID}`]: expenseReport,
-+                    [`${ONYXKEYS.COLLECTION.REPORT}${chatReport.reportID}`]: null,
-+                    [`${ONYXKEYS.COLLECTION.TRANSACTION}${heldTransaction.transactionID}`]: {...heldTransaction, reimbursable: false},
-+                });
++                await Onyx.set(`${ONYXKEYS.COLLECTION.REPORT}${expenseReport.reportID}`, expenseReport);
++                await Onyx.set(`${ONYXKEYS.COLLECTION.REPORT}${chatReport.reportID}`, null);
++                await Onyx.set(`${ONYXKEYS.COLLECTION.TRANSACTION}${heldTransaction.transactionID}`, {...heldTransaction, reimbursable: false});
 +                await waitForBatchedUpdates();
 +
 +                // When only the unheld expenses are approved, the non-reimbursable amount moves to the held report.
